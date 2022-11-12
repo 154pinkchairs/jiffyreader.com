@@ -22,18 +22,45 @@ let origin = '';
 /** @type {import('./siteElementExclusions').Excluder} */
 let excludeByOrigin;
 
+//make an asynchronous main function to opimize the whole process. The extension should not wait until fixations are made on the whole page, but run paragraph by paragraph, before the page is loaded
+async function main() {
+  //get the origin of the page
+  origin = window.location.origin;
+  excludeByOrigin = makeExcluder(origin);
+  observer = new NodeObserver(document.body, { childList: true, subtree: true }, mutationCallback);
+  //the callback function is called when a mutation is detected
+  observer.addCallback(mutationCallback);
+  observer.addMutationTypes(MUTATION_TYPES);
+  observer.addIgnoreTags(IGNORE_NODE_TAGS);
+  observer.addIgnoreAttributes(IGNORE_MUTATIONS_ATTRIBUTES);
+  observer.start();
+  //fixate the page paragraph by paragraph, before the page is loaded
+  for (const paragraph of document.querySelectorAll('p')) {
+    await highlightText(paragraph.innerHTML);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await makeFixations(paragraph);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await parseNode(paragraph);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await addStyles(paragraph, document);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  observer.stop();
+}
+
 // making half of the letters in a word bold
-function highlightText(sentenceText) {
-	return sentenceText.replace(/\p{L}+/gu, (word) => {
-		const { length } = word;
-
-		const brWordStemWidth = length > 3 ? Math.round(length * BR_WORD_STEM_PERCENTAGE) : length;
-
-		const firstHalf = word.slice(0, brWordStemWidth);
-		const secondHalf = word.slice(brWordStemWidth);
-		const htmlWord = `<br-bold>${makeFixations(firstHalf)}</br-bold>${secondHalf.length ? `<br-edge>${secondHalf}</br-edge>` : ''}`;
-		return htmlWord;
-	});
+function highlightText(sentenceText: string) {
+  let result = "";
+  let sentences = sentenceText.split(".");
+  for (let i = 0; i < sentences.length; i++) {
+    let sentence = sentences[i];
+    let htmlWord = `<br-bold>${makeFixations(sentence)}</br-bold>`;
+    result += htmlWord;
+    if (i < sentences.length - 1) {
+      result += ".";
+    }
+  }
+  return result; 
 }
 
 function makeFixations(/** @type string */ textContent) {
@@ -75,7 +102,7 @@ function parseNode(/** @type Element */ node) {
 	if (node.nodeType === Node.TEXT_NODE && node.nodeValue.length) {
 		try {
 			const brSpan = document.createElement('br-span');
-
+      //this gives us 'Type 'Promise<string>' is not assignable to type 'string', so we need to use await
 			brSpan.innerHTML = highlightText(node.nodeValue);
 
 			if (brSpan.childElementCount === 0) return;
